@@ -18,7 +18,13 @@ library(caret)
 
 #====== Load Data ======#
 ```{r}
-wine <- read.csv("C:/Users/rhine/Desktop/SMU MSDS/DS 6306 - Doing Data Science/Project 2/Wine Train Set.csv")
+train_data_path <- " "
+predict_data_path <- " "
+working_directory <- " "
+```
+
+```{r}
+wine <- read.csv(train_data_path)
 ```
 
 #====== Exploratory Data Analysis ======#
@@ -466,7 +472,7 @@ save(step_model_final, file = "wine_stepwise_model.RData")
 
 #====== Import Data to Make Prediction On ======#
 ```{r}
-wine_submission <- read.csv("C:/Users/rhine/Desktop/SMU MSDS/DS 6306 - Doing Data Science/Project 2/Wine Test Set.csv")
+wine_submission <- read.csv(test_data_path)
 ```
 
 #====== Pre-Processing ======#
@@ -528,7 +534,7 @@ wine_submission <- wine_submission %>%
 
 #====== Save Generated Predictions to CSV File in Working Directory ======#
 ```{r}
-setwd("C:/Users/rhine/Desktop/SMU MSDS/DS 6306 - Doing Data Science/Project 2")  # Replace with your desired path
+setwd(predict_data_path)  # Replace with your desired path
 write.csv(wine_submission, "wine_submission.csv", row.names = FALSE)
 ```
 
