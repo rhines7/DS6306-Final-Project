@@ -1,0 +1,573 @@
+---
+title: "DS-6306 Project 2: EDA"
+author: "Robert Hines"
+date: "2024-07-27"
+output: word_document
+---
+
+#====== Load Libraries ======#
+```{r}
+library(dplyr) # A Grammar of Data Manipulation and Transformation
+library(reshape2)  # For reshaping data
+library(ggplot2) # Elegant Data Visualizations Using the Grammar of Graphics
+library(ggcorrplot) # For creating correlation plots
+library(gridExtra)  # For arranging multiple plots side by side
+library(car)
+library(caret)
+```
+
+#====== Load Data ======#
+```{r}
+wine <- read.csv("C:/Users/rhine/Desktop/SMU MSDS/DS 6306 - Doing Data Science/Project 2/Wine Train Set.csv")
+```
+
+#====== Exploratory Data Analysis ======#
+```{r}
+# View the structure of the dataset
+str(wine)
+```
+
+```{r}
+summary(wine)
+```
+
+#====== Exploratory Data Analysis: Check for missing data and visualize proportion of missing data in each field ======#
+```{r}
+# Calculate proportion of missing values
+missing_prop <- colMeans(is.na(wine))
+missing_df <- data.frame(variable = names(wine), prop_missing = missing_prop)
+
+missing_df
+```
+
+#====== No Missing Data! Next, check for duplicate data ======#
+```{r}
+# Visual inspection
+head(wine[duplicated(wine), ])
+```
+
+#====== Check the Factors and Ordinal Data: Correct Typos ======#
+```{r}
+unique(wine$type)
+unique(wine$location)
+unique(wine$quality)
+```
+
+```{r}
+wine <- wine %>%
+  mutate(location = case_when(location == "Califormia" ~ "California", TRUE ~ location))
+
+unique(wine$location)
+```
+
+#====== Check for zero variance columns ======#
+```{r}
+zero_var <- wine %>%
+  select_if(function(x) length(unique(x)) == 1)
+
+ncol(zero_var)
+```
+
+#====== Convert columns to factors ======#
+```{r}
+columns_to_factor <- c("type", "location")
+
+wine <- wine %>%
+  mutate(quality = as.numeric(quality), ) %>%
+  mutate_at(vars(one_of(columns_to_factor)), as.factor)
+```
+
+```{r}
+# Exclude the ID column because it provides no value for analysis
+wine_subset <- wine %>%
+  dplyr::select(-ID, -type, -location)
+
+# Correlation matrix for numeric columns
+cor_matrix <- cor(wine_subset, use = "complete.obs")
+```
+
+```{r}
+# Creating a correlation plot
+ggcorrplot(cor_matrix, method = "square",  type = "upper",
+  lab = TRUE,
+  lab_size = 2.5,
+  colors = c("#0073C2FF", "white", "#EFC000FF"),
+  title = "Correlation Plot of Wine Variables",
+  ggtheme = ggplot2::theme_minimal()
+) + 
+  theme(legend.position = "none")
+```
+
+```{r}
+# Grouping the data by the 'quality' column and calculating the mean of each group
+grouped_data <- wine_subset %>%
+  dplyr::group_by(quality) %>%
+  dplyr::summarise(across(everything(), mean, na.rm = TRUE))
+
+grouped_data
+```
+
+```{r}
+# Convert the grouped data to a long format
+long_grouped_data <- reshape2::melt(grouped_data, id.vars = "quality")
+
+# Plot each feature against quality
+ggplot2::ggplot(long_grouped_data, aes(x = quality, y = value, color = variable)) +
+  ggplot2::geom_line() +
+  ggplot2::geom_point() +
+  ggplot2::labs(title = "Effect of Each Feature on Quality",
+                x = "Quality",
+                y = "Mean Value of Feature",
+                color = "Feature") +
+  ggplot2::theme_minimal()
+```
+
+```{r}
+features <- unique(long_grouped_data$variable)
+```
+
+```{r}
+# Generate individual plots for each feature
+for (feature in features) {
+  plot <- ggplot2::ggplot(subset(long_grouped_data, variable == feature), 
+                          aes(x = quality, y = value)) +
+    ggplot2::geom_line(color = "blue") +
+    ggplot2::geom_point(color = "red") +
+    ggplot2::labs(title = paste("Effect of", feature, "on Quality"),
+                  x = "Quality",
+                  y = paste("Mean Value of", feature)) +
+    ggplot2::theme_minimal()
+  
+  # Print the plot
+  print(plot)
+}
+```
+
+```{r}
+# Convert columns to factors
+wine_boxplot <- wine_subset %>%
+  mutate(quality = as.factor(quality), )
+```
+
+```{r}
+# List of numeric variables
+numeric_vars <- names(wine_boxplot)[sapply(wine_boxplot, is.numeric)]
+factor_var <- "quality"
+
+# Creating individual boxplots for each numeric variable grouped by the factor levels
+for (var in numeric_vars) {
+  p <- ggplot(wine_boxplot, aes_string(x = factor_var, y = var, fill = factor_var)) +
+    geom_boxplot(outlier.color = "red", outlier.shape = 16, outlier.size = 2) +
+    labs(
+      title = paste("Boxplot of", var, "by", factor_var),
+      x = factor_var,
+      y = var
+    ) +
+    theme_minimal() +
+    theme(legend.position = "none")
+    
+  print(p)
+}
+```
+
+```{r}
+# Plotting each variable
+plot_list <- list()
+
+for (var in numeric_vars) {
+  
+  # Density plot
+  p1 <- ggplot(wine_boxplot, aes_string(x = var, fill = var)) +
+    geom_histogram(aes(y = ..density..), position = "identity", alpha = 0.5, bins = 30) +
+    geom_density(alpha = 0.8) +
+    theme_minimal() +
+    theme(legend.position = "none") +
+    labs(title = paste("Density of", var))
+  
+  # Boxplot
+  p2 <- ggplot(wine_boxplot, aes_string(x = factor_var, y = var, fill = factor_var)) +
+    geom_boxplot() +
+    theme_minimal() +
+    theme(legend.position = "none") +
+    labs(title = paste("Boxplot of", var))
+  
+  # Combine the two plots side by side
+  combined_plot <- grid.arrange(p1, p2, ncol = 2)
+  
+  # Save the combined plot to the list
+  plot_list[[var]] <- combined_plot
+}
+
+print(plot_list)
+```
+
+```{r}
+# Scale the numeric variables (excluding 'quality')
+wine_scaled <- as.data.frame(scale(wine_subset[ , -which(names(wine_subset) == "quality")]))
+wine_scaled$quality <- wine_subset$quality  # Add the 'quality' variable back to the scaled data
+
+# Reshape the scaled data to a long format
+wine_long <- melt(wine_scaled, id.vars = "quality")
+```
+
+```{r}
+# Create boxplots for each variable to assess for outliers
+ggplot(wine_long, aes(x = variable, y = value)) + 
+  geom_boxplot(outlier.colour = "red", outlier.shape = 8, outlier.size = 2) +
+  labs(title = "Boxplots of Scaled Wine Dataset Variables to Identify Outliers",
+       x = "Variable",
+       y = "Scaled Value") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r}
+wine_scaled$type <- wine$type
+wine_scaled$location <- wine$location
+```
+
+```{r}
+# Function to calculate regression metrics
+calculate_regression_metrics <- function(model, model_name, data, response_variable) {
+
+  predicted_values <- predict(model, data)
+  actual_values <- data[[response_variable]]
+  r_squared <- summary(model)$r.squared
+  adj_r_squared <- summary(model)$adj.r.squared
+  mse <- mean((predicted_values - actual_values)^2)
+  rmse <- sqrt(mse)
+  mae <- mean(abs(predicted_values - actual_values))
+
+  # Create a formatted string to display the metrics
+  metrics <- sprintf(
+    "%-20s | %-8s | %-8s | %-12s | %-12s | %-8s\n",
+    model_name,
+    round(r_squared, 4),
+    round(adj_r_squared, 4),
+    round(mse, 4),
+    round(rmse, 4),
+    round(mae, 4)
+  )
+  
+  return(metrics)
+}
+```
+
+```{r}
+# Function to print the metrics for multiple models
+print_metrics <- function(...) {
+  models <- list(...)
+  
+  cat(sprintf("%-20s | %-8s | %-8s | %-12s | %-12s | %-8s\n",
+              "Model", "R-squared", "Adj. R-sq", "MSE", "RMSE", "MAE"))
+  cat(rep("-", 75), "\n", sep = "")
+  
+  for (model in models) {
+    cat(model)
+  }
+}
+```
+
+#====== Split Training and Testing Sets ======#
+```{r}
+set.seed(123)
+
+# Splitting Data into Train/Test Sets
+train_index <- createDataPartition(wine_scaled$quality, p = 0.75, list = FALSE)
+train_data <- wine_scaled[train_index, ]
+test_data <- wine_scaled[-train_index, ]
+train_control <- trainControl(method = "repeatedcv", number = 15, repeats = 3, savePredictions = "all")
+```
+
+#====== Initial Model and Metrics ======#
+```{r}
+# Fit the initial linear model with all variables
+initial_model <- train(quality ~ ., data = wine_scaled, method = "lm", trControl = train_control)
+```
+
+```{r}
+# Fit the initial linear model with all variables
+initial_metrics <- calculate_regression_metrics(initial_model, "Initial Model", wine_scaled, "quality")
+
+print_metrics(initial_metrics)
+```
+
+```{r}
+summary(initial_model)
+```
+
+#====== Feature Importance with Regards to Quality ======#
+```{r}
+# Extract and plot the coefficients
+coefficients <- summary(initial_model)$coefficients[-1, ]
+coef_df <- as.data.frame(coefficients)
+coef_df$Variable <- rownames(coef_df)
+
+# Add a column for the absolute value of the coefficient for color scaling
+coef_df$Impact <- abs(coef_df$Estimate)
+
+# Select the top 10 most impactful variables
+top10_coef_df <- coef_df[order(-coef_df$Impact), ][1:10, ]
+
+# Plot coefficients with blue for negative and red for positive
+ggplot(top10_coef_df, aes(x = reorder(Variable, Estimate), y = Estimate, fill = Estimate)) +
+  geom_bar(stat = "identity") +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0) +  # Blue for negative, red for positive
+  coord_flip() +
+  labs(title = "Feature Importance from Linear Regression",
+       x = "Features",
+       y = "Coefficient Estimate") +
+  theme_minimal()
+```
+
+#====== Intermediate Model and Metrics ======#
+```{r}
+set.seed(123)
+# Fit the initial linear model with all variables
+intermediate_model <- train(quality ~ 
+                              (fixed.acidity + volatile.acidity + free.sulfur.dioxide + 
+                                 free.sulfur.dioxide/total.sulfur.dioxide + density + pH + 
+                                 sulphates + alcohol + residual.sugar + type + location) * type + 
+                              (fixed.acidity + volatile.acidity +free.sulfur.dioxide + 
+                                 free.sulfur.dioxide/total.sulfur.dioxide + density + pH + 
+                                 sulphates + alcohol + residual.sugar + type + location) * location, 
+                            data = train_data, 
+                            method = "lm", 
+                            trControl = train_control)
+```
+
+```{r}
+summary(intermediate_model)
+```
+
+#====== Refined Model and Metrics ======#
+```{r}
+set.seed(123)
+# Fit the initial linear model with all variables
+refined_model <- train(quality ~ fixed.acidity + volatile.acidity + free.sulfur.dioxide + density + 
+                         residual.sugar + type + alcohol*location + sulphates*alcohol + alcohol + 
+                         free.sulfur.dioxide:total.sulfur.dioxide + density:type + pH:type*alcohol + 
+                         residual.sugar:type + free.sulfur.dioxide:location*alcohol + density:location*alcohol, 
+                       data = train_data,
+                       method = "lm", 
+                       trControl = train_control)
+```
+
+```{r}
+vif(refined_model$finalModel)
+```
+
+```{r}
+anova(refined_model$finalModel)
+```
+
+```{r}
+# Fit the initial linear model with all variables
+summary(refined_model)
+```
+
+#====== Final Model and Metrics ======#
+```{r}
+set.seed(123)
+# Fit the initial linear model with all variables
+final_model <- train(quality ~ fixed.acidity + volatile.acidity + free.sulfur.dioxide +
+                       type + alcohol*location + sulphates*alcohol + alcohol + 
+                       free.sulfur.dioxide:total.sulfur.dioxide + pH:type * alcohol +
+                       residual.sugar:type + free.sulfur.dioxide:location * alcohol,
+                     data = train_data, 
+                     method = "lm", 
+                     trControl = train_control)
+```
+
+```{r}
+vif(final_model$finalModel)
+```
+
+```{r}
+anova(final_model$finalModel)
+```
+
+```{r}
+# Fit the initial linear model with all variables
+summary(final_model)
+```
+
+```{r}
+# Fit the initial linear model with all variables
+intermediate_metrics <- calculate_regression_metrics(intermediate_model, "Intermediate Model", wine_scaled, "quality")
+refined_metrics <- calculate_regression_metrics(refined_model, "Refined Model", wine_scaled, "quality")
+final_metrics <- calculate_regression_metrics(final_model, "Final Model", wine_scaled, "quality")
+```
+
+```{r}
+print_metrics(initial_metrics, intermediate_metrics, refined_metrics, final_metrics)
+```
+
+#====== Forward, Backward, and Stepwise Selection and Metrics ======#
+```{r}
+fwd_model_final <- ols_step_forward_adj_r2(final_model$finalModel)
+back_model_final <- ols_step_backward_adj_r2(final_model$finalModel)
+step_model_final <- ols_step_both_adj_r2(final_model$finalModel)
+```
+
+```{r}
+fwd_model_final
+back_model_final
+step_model_final
+```
+
+#====== Assess Residuals, Normal QQ, Scale-Location, and Leverage Plots ======#
+```{r}
+library(ggfortify)  # Used for diagnostic plots
+
+autoplot(final_model$finalModel)  
+```
+
+```{r}
+cooks.distance(final_model$finalModel)
+plot(cooks.distance(final_model$finalModel))
+```
+
+#====== Assess the Added-Variable Plots (Partial Regression Plots) to show the relationship between each predictor and the response variable ======#
+```{r}
+# avPlots(final_model$finalModel)
+```
+
+```{r}
+# Extract and plot the coefficients
+coefficients <- summary(final_model)$coefficients[-1, ]
+coef_df <- as.data.frame(coefficients)
+coef_df$Variable <- rownames(coef_df)
+
+# Add a column for the absolute value of the coefficient for color scaling
+coef_df$Impact <- abs(coef_df$Estimate)
+
+# Select the top 10 most impactful variables
+top10_coef_df <- coef_df[order(-coef_df$Impact), ][1:10, ]
+
+# Plot coefficients with blue for negative and red for positive
+ggplot(top10_coef_df, aes(x = reorder(Variable, Estimate), y = Estimate, fill = Estimate)) +
+  geom_bar(stat = "identity") +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0) +  # Blue for negative, red for positive
+  coord_flip() +
+  labs(title = "Feature Importance from Linear Regression",
+       x = "Features",
+       y = "Coefficient Estimate") +
+  theme_minimal()
+```
+
+#====== Save Multiple Models to Use in RShiny App ======#
+```{r}
+save(initial_model, file = "wine_initial_model.RData")
+save(intermediate_model, file = "wine_intermediate_model.RData")
+save(final_model, file = "wine_final_model.RData")
+save(step_model_final, file = "wine_stepwise_model.RData")
+```
+
+#====== Import Data to Make Prediction On ======#
+```{r}
+wine_submission <- read.csv("C:/Users/rhine/Desktop/SMU MSDS/DS 6306 - Doing Data Science/Project 2/Wine Test Set.csv")
+```
+
+#====== Pre-Processing ======#
+```{r}
+### Inspect Categorical Variables before Converting to Factors ###
+unique(wine_submission$type)
+unique(wine_submission$location)
+unique(wine_submission$quality)
+```
+
+```{r}
+# Correct data entry errors using case_when
+wine_submission <- wine_submission %>%
+  mutate(location = case_when(location == "Califormia" ~ "California", TRUE ~ location))
+
+# Verify the changes
+unique(wine_submission$location)
+```
+
+```{r}
+# Check for zero variance columns
+zero_var <- wine_submission %>%
+  select_if(function(x) length(unique(x)) == 1)
+
+ncol(zero_var)
+```
+
+```{r}
+# Columns to convert to factors
+columns_to_factor <- c("type", "location")
+
+# Convert multiple columns to factors
+wine_submission <- wine_submission %>%
+  mutate_at(vars(one_of(columns_to_factor)), as.factor)
+```
+
+```{r}
+# Exclude the ID column because it provides no value for analysis
+wine_sub <- wine_submission %>%
+  dplyr::select(-ID, -type, -location)
+```
+
+```{r}
+# Scale the numeric variables (excluding 'quality')
+wine_sub <- as.data.frame(scale(wine_sub))
+```
+
+```{r}
+# Fit the initial linear model with all variables
+wine_sub$type <- wine_submission$type
+wine_sub$location <- wine_submission$location
+```
+
+```{r}
+wine_submission$quality <- round(predict(final_model, newdata = wine_sub))
+wine_submission <- wine_submission %>%
+  dplyr::select(ID, quality)
+```
+
+#====== Save Generated Predictions to CSV File in Working Directory ======#
+```{r}
+setwd("C:/Users/rhine/Desktop/SMU MSDS/DS 6306 - Doing Data Science/Project 2")  # Replace with your desired path
+write.csv(wine_submission, "wine_submission.csv", row.names = FALSE)
+```
+
+#====== Feature Engineering: Deprecated ======#
+```{r}
+# ### Sugar to Acidity Ratio: The ratio between sweetness and tartness of the wine's flavor ###
+# wine_subset$sugar.to.acidity <- wine_subset$residual.sugar / wine_subset$total.acidity
+# 
+# ### Free to Total Sulfur Dioxide (SO2) Ratio: The Proportion of SO2 available to Protect the Wine from Oxidation and Spoilage ###
+# wine_subset$free.to.total.SO2 <- wine_subset$free.sulfur.dioxide / wine_subset$total.sulfur.dioxide
+# 
+# ### Density-Alcohol Interaction ###
+# wine_subset$density.alcohol.interaction <- wine_subset$density * wine_subset$alcohol
+# 
+# ### pH-Acidity Interaction ###
+# wine_subset$pH.acidity.interaction <- wine_subset$pH + wine_subset$total.acidity
+# 
+# ### Normalized Chlorides: Accounts for variations in wine body and provides a more accurate measure of saltiness ###
+# wine_subset$normalized.chlorides <- wine_subset$chlorides / wine_subset$density
+# 
+# ### Adjusted Alcohol Content: Accounts for the balance between sweetness and alcohol ###
+# wine_subset$adjusted.alcohol <- wine_subset$alcohol / (wine_subset$residual.sugar + 1)
+```
+
+```{r}
+### All Derived Features ###
+
+# wine_engineered <- wine_subset %>%
+#   mutate(
+#     free.to.total.SO2 = free.sulfur.dioxide / total.sulfur.dioxide,
+#     adjusted.alcohol = alcohol / (residual.sugar + 1),
+#     sugar.to.sulphates = residual.sugar / sulphates,
+#     sugar.to.acidity = residual.sugar / (fixed.acidity + volatile.acidity),
+#     density.alcohol.interaction = density * alcohol,
+#     pH.acidity.interaction = pH * (fixed.acidity + volatile.acidity),
+#     normalized.chlorides = chlorides / density,
+#     chlorides.to.acidity = chlorides / (fixed.acidity + volatile.acidity),
+#     alcohol.to.acidity = alcohol / (fixed.acidity + volatile.acidity),
+#     acidity.balance = (fixed.acidity + volatile.acidity) - pH,
+#     sulphates.to.alcohol = sulphates / alcohol,
+#   )
+```
